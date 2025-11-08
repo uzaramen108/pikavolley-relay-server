@@ -1,0 +1,10 @@
+{
+  "name": "pikavolley-relay-server",
+  "version": "1.0.0",
+  "description": "Spectator Relay Server",
+  "main": "server.js",
+  "type": "module",
+  "dependencies": {
+    "ws": "^8.14.2"
+  }
+}
