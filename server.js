@@ -1,35 +1,29 @@
-// 'ws' 라이브러리가 필요하네. npm install ws
+// [ server.js 파일 전체를 이 코드로 덮어쓰게 ]
 import { WebSocketServer } from "ws";
 import { createServer } from "http";
 import { parse } from "url";
 
-// Render.com은 HTTP 서버가 응답해야 '정상'으로 인식하네.
 const server = createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Pikachu Volleyball Relay Server is running.\n");
+  res.end("Pikachu Volleyball Relay Server (Stateful) is running.\n");
 });
 
 const wss = new WebSocketServer({ server });
 
-// 모든 방(Room)을 관리할 객체일세
-// key: roomId, value: { players: Set<WebSocket>, spectators: Set<WebSocket> }
+// [수정] 방 구조를 '관전자'와 '게임 내역 리스트'로 변경
 const rooms = new Map();
 
 function getRoom(roomId) {
   if (!rooms.has(roomId)) {
     rooms.set(roomId, {
-      players: new Set(),
       spectators: new Set(),
+      gameHistory: [], // [핵심] 이 '리스트'가 모든 입력을 저장하네
     });
   }
   return rooms.get(roomId);
 }
 
 wss.on("connection", (ws, req) => {
-  let currentRoom = null;
-  let isPlayer = false;
-
-  // 1. URL에서 Room ID를 파싱하네
   const { pathname } = parse(req.url);
   const roomId = pathname.split("/").pop();
   if (!roomId) {
@@ -37,26 +31,40 @@ wss.on("connection", (ws, req) => {
     return;
   }
 
-  // 2. 메시지 핸들러
+  const currentRoom = getRoom(roomId);
+  let isPlayer = false;
+
   ws.on("message", (message) => {
     try {
-      // 2-A. 첫 메시지 (JSON으로 된 식별 정보)
+      // 1. 메시지가 '문자열'일 경우 (최초 식별)
       if (typeof message === "string") {
         const data = JSON.parse(message);
-        currentRoom = getRoom(roomId);
 
         if (data.type === "identify_player") {
-          console.log(`[${roomId}] Player ${data.player} connected.`);
           isPlayer = true;
-          currentRoom.players.add(ws);
-        } else if (data.type === "watch") {
+          console.log(`[${roomId}] Player connected.`);
+        } 
+        else if (data.type === "watch") {
           console.log(`[${roomId}] Spectator connected.`);
           currentRoom.spectators.add(ws);
+
+          // [핵심!] 관전자에게 '현재까지 쌓인 내역(리스트)'을 즉시 전송
+          ws.send(
+            JSON.stringify({
+              type: "history",
+              history: currentRoom.gameHistory,
+            })
+          );
         }
-      } 
-      // 2-B. 게임 데이터 (ArrayBuffer)
-      else if (isPlayer && currentRoom) {
-        // 플레이어에게서 받은 데이터를 모든 관전자에게 '방송'하네
+      }
+      
+      // 2. 메시지가 'ArrayBuffer'일 경우 (플레이어의 게임 데이터)
+      else if (isPlayer) {
+        // [핵심!]
+        // 2-A. 이 '리스트'에 게임 데이터를 '누적'하네
+        currentRoom.gameHistory.push(message);
+
+        // 2-B. '현재 접속 중인' 모든 관전자에게 '생방송'으로도 보내네
         currentRoom.spectators.forEach((spectator) => {
           if (spectator.readyState === 1 /* WebSocket.OPEN */) {
             spectator.send(message); // 받은 ArrayBuffer 그대로 전송
@@ -68,21 +76,12 @@ wss.on("connection", (ws, req) => {
     }
   });
 
-  // 3. 연결 종료 핸들러
   ws.on("close", () => {
-    if (currentRoom) {
-      console.log(`[${roomId}] A client disconnected.`);
-      if (isPlayer) {
-        currentRoom.players.delete(ws);
-      } else {
-        currentRoom.spectators.delete(ws);
-      }
-      // 방이 비었으면 메모리에서 삭제
-      if (currentRoom.players.size === 0 && currentRoom.spectators.size === 0) {
-        rooms.delete(roomId);
-        console.log(`[${roomId}] Room closed.`);
-      }
+    if (currentRoom && !isPlayer) {
+      currentRoom.spectators.delete(ws);
+      console.log(`[${roomId}] Spectator disconnected.`);
     }
+    // [참고] 플레이어가 나가도 'gameHistory'는 방에 계속 남겨두네.
   });
 });
 
