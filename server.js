@@ -3,15 +3,24 @@ import { createServer } from "http";
 import { parse } from "url";
 
 const server = createServer((req, res) => {
+  if (req.url === "/rooms" && req.method === "GET") {
+    // 1. 현재 'rooms' 맵에 있는 모든 방 ID를 배열로 변환
+    const activeRooms = Array.from(rooms.keys());
+    
+    // 2. JSON 형태로 응답
+    res.writeHead(200, { 
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*" // [중요] CORS 오류 방지
+    });
+    res.end(JSON.stringify({ rooms: activeRooms }));
+    return;
+  }
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("Pikachu Volleyball Replay Server (Input-based) is running.\n");
 });
 
 const wss = new WebSocketServer({ server });
 
-// [핵심 수정 1]
-// 방 구조를 'ReplaySaver' 클래스와 유사하게 변경합니다.
-// 이제 ArrayBuffer가 아닌 '숫자'를 저장하므로 메모리 걱정이 없습니다.
 const rooms = new Map();
 
 function getRoom(roomId) {
