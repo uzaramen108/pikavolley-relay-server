@@ -3,9 +3,19 @@ import { createServer } from "http";
 import { parse } from "url";
 
 const server = createServer((req, res) => {
+  // [수정] API 라우터
   if (req.url === "/rooms" && req.method === "GET") {
-    // 1. 현재 'rooms' 맵에 있는 모든 방 ID를 배열로 변환
-    const activeRooms = Array.from(rooms.keys());
+    // 1. 현재 'rooms' 맵을 순회하며 [ {id, nicknames}, ... ] 배열 생성
+    const activeRooms = [];
+    rooms.forEach((roomData, roomId) => {
+      // 플레이어가 식별된 방만 목록에 포함 (즉, identify_player를 보낸 방)
+      if (roomData.player !== null) {
+        activeRooms.push({
+          id: roomId,
+          nicknames: roomData.nicknames 
+        });
+      }
+    });
     
     // 2. JSON 형태로 응답
     res.writeHead(200, { 
