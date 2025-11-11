@@ -143,6 +143,7 @@ wss.on("connection", (ws, req) => {
           }
           
           const optionsData = [currentRoom.frameCounter, data.options];
+          console.log(optionsData)
           currentRoom.options.push(optionsData); // 1. 누적
 
           // 2. 실시간 전송
@@ -164,6 +165,7 @@ wss.on("connection", (ws, req) => {
           }
           
           const chatData = [currentRoom.frameCounter, data.whichPlayerSide, data.chatMessage];
+          console.log(chatData)
           currentRoom.chats.push(chatData);
           
           // 2. 실시간 전송
