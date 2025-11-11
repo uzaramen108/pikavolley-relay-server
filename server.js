@@ -10,7 +10,8 @@ const server = createServer((req, res) => {
       if (roomData.player !== null) {
         activeRooms.push({
           id: roomId,
-          nicknames: roomData.nicknames 
+          nicknames: roomData.nicknames,
+          ips: roomData.partialPublicIPs
         });
       }
     });
