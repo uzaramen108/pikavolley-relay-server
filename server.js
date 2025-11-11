@@ -3,12 +3,10 @@ import { createServer } from "http";
 import { parse } from "url";
 
 const server = createServer((req, res) => {
-  // [수정] API 라우터
   if (req.url === "/rooms" && req.method === "GET") {
     // 1. 현재 'rooms' 맵을 순회하며 [ {id, nicknames}, ... ] 배열 생성
     const activeRooms = [];
     rooms.forEach((roomData, roomId) => {
-      // 플레이어가 식별된 방만 목록에 포함 (즉, identify_player를 보낸 방)
       if (roomData.player !== null) {
         activeRooms.push({
           id: roomId,
@@ -44,10 +42,12 @@ function getRoom(roomId) {
       roomID: roomId,
       nicknames: ['', ''],
       partialPublicIPs: ['*.*.*.*', '*.*.*.*'],
-      inputs: [], // [핵심] 여기에 압축된 '입력값(숫자)'이 누적됩니다.
+      inputs: [],
       options: [], // [frameCounter, options][]
       chats: [], // [frameCounter, playerIndex, chatMessage][]
       frameCounter: 0,
+      IsGameEnd: false,
+      endFrame: null,
       // ------------------------------
     });
   }
@@ -68,9 +68,6 @@ wss.on("connection", (ws, req) => {
   ws.on("message", (message) => {
     let data;
     try {
-      // [핵심 수정 2]
-      // 이제 모든 통신은 JSON 기반의 '문자열'이라고 가정합니다.
-      // ArrayBuffer는 더 이상 사용하지 않습니다.
       data = JSON.parse(message);
     } catch (e) {
       console.error(`[${roomId}] Failed to parse JSON message:`, message);
@@ -79,13 +76,10 @@ wss.on("connection", (ws, req) => {
 
     try {
       switch (data.type) {
-        // --- 플레이어 식별 및 메타데이터 기록 ---
         case "identify_player":
           isThisConnectionPlayer = true;
           currentRoom.player = ws;
           console.log(`[${roomId}] Player connected.`);
-          
-          // ReplaySaver.js의 recordNicknames, recordPartialPublicIPs 역할
           if (data.nicknames) {
             currentRoom.nicknames = data.nicknames;
           }
@@ -93,18 +87,15 @@ wss.on("connection", (ws, req) => {
             currentRoom.partialPublicIPs = data.partialPublicIPs;
           }
           break;
-
-        // --- 관전자 접속 ---
         case "watch":
           console.log(`[${roomId}] Spectator connected.`);
           currentRoom.spectators.add(ws);
 
-          // [핵심 수정 3]
           // 관전자가 접속하면, '현재까지 누적된 모든 리플레이 데이터 팩'을 전송합니다.
           // (이전의 'history' 전송과 동일한 로직)
           ws.send(
             JSON.stringify({
-              type: "replay_pack", // 클라이언트는 이 '팩'을 받아 "빨리 감기" 해야 함
+              type: "replay_pack", // Accumulated input data
               pack: {
                 version: 'p2p-online-spectator',
                 roomID: currentRoom.roomID,
@@ -119,14 +110,16 @@ wss.on("connection", (ws, req) => {
           break;
 
         // --- (A) 핵심: 플레이어 '입력' 데이터 수신 ---
-        case "inputs":
-          if (!isThisConnectionPlayer) return; // 플레이어만 이 메시지를 보낼 수 있음
-          
-          // data.value는 클라이언트가 (input1 << 5) + input2로
-          // '압축한 10비트 숫자'여야 합니다.
+        case "inputs": // Realtime input data
+          if (!isThisConnectionPlayer) {
+            return; // Prevent data jacking
+          }
           const usersInputNumber = data.value;
-
-          // 1. 리플레이용 'inputs' 리스트에 누적
+          if (usersInputNumber === -1 && !currentRoom.IsGameEnd) {
+              console.log(`[${roomId}] 'End of Stream' (-1) 신호 수신. 게임을 종료 처리합니다.`);
+              currentRoom.IsGameEnd = true;
+              currentRoom.endFrame = currentRoom.frameCounter;
+          }
           currentRoom.inputs.push(usersInputNumber);
           currentRoom.frameCounter++; // 서버도 프레임 카운터 동기화
 
@@ -144,7 +137,9 @@ wss.on("connection", (ws, req) => {
 
         // --- (B) '옵션' 데이터 수신 ---
         case "options":
-          if (!isThisConnectionPlayer) return;
+          if (!isThisConnectionPlayer) {
+            return;
+          }
           
           const optionsData = [currentRoom.frameCounter, data.options];
           currentRoom.options.push(optionsData); // 1. 누적
@@ -163,10 +158,12 @@ wss.on("connection", (ws, req) => {
 
         // --- (C) '채팅' 데이터 수신 ---
         case "chat":
-          if (!isThisConnectionPlayer) return;
+          if (!isThisConnectionPlayer) {
+            return;
+          }
           
           const chatData = [currentRoom.frameCounter, data.whichPlayerSide, data.chatMessage];
-          currentRoom.chats.push(chatData); // 1. 누적
+          currentRoom.chats.push(chatData);
           
           // 2. 실시간 전송
           const liveChatMessage = JSON.stringify({
@@ -190,7 +187,6 @@ wss.on("connection", (ws, req) => {
       console.log(`[${roomId}] Player disconnected.`);
       currentRoom.player = null;
       // 플레이어가 나가도 리플레이 데이터는 유지됩니다 (render.com이 재시작하기 전까지)
-      // [메모리 관리] 5분 뒤 관전자가 없으면 방을 삭제합니다.
       setTimeout(() => {
         if (currentRoom.player === null && currentRoom.spectators.size === 0) {
           console.log(`[${roomId}] Room empty for 5 mins. Deleting history.`);
