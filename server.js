@@ -112,14 +112,14 @@ wss.on("connection", (ws, req) => {
 
         // --- (A) 핵심: 플레이어 '입력' 데이터 수신 ---
         case "inputs": // Realtime input data
-          if (!isThisConnectionPlayer) {
-            return; // Prevent data jacking
-          }
           const usersInputNumber = data.value;
-          if (usersInputNumber === -1 && !currentRoom.IsGameEnd) {
+          if (usersInputNumber == -1 && !currentRoom.IsGameEnd) {
               console.log(`[${roomId}] 'End of Stream' (-1) 신호 수신. 게임을 종료 처리합니다.`);
               currentRoom.IsGameEnd = true;
               currentRoom.endFrame = currentRoom.frameCounter;
+          }
+          if (!isThisConnectionPlayer) {
+            return; // Prevent data jacking
           }
           currentRoom.inputs.push(usersInputNumber);
           currentRoom.frameCounter++; // 서버도 프레임 카운터 동기화
